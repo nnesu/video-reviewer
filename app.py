@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSizeF, QRectF, Qt, QUrl
+from PySide6.QtCore import QEvent, QSizeF, QRectF, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QImage, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from browser import VideoBrowser
+import shortcuts as S
 
 
 def fmt(ms):
@@ -195,10 +196,13 @@ class MainWindow(QMainWindow):
         self.file_lbl = T.ElidedLabel("No video loaded", "hint")
         self.name_lbl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.file_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # path elides instead of widening the window
-        open_btn = T.button("Open Video", "folder", "outline", tooltip="Open a video file")
+        open_btn = T.button("Open Video", "folder", "outline")
         open_btn.clicked.connect(self.open_dialog)
+        keys_btn = T.button("", "keyboard", "icon")
+        keys_btn.clicked.connect(self.open_shortcuts)
         hl.addWidget(self.name_lbl)
         hl.addWidget(self.file_lbl, 1)
+        hl.addWidget(keys_btn)
         hl.addWidget(open_btn)
 
         # ---- video stage ----
@@ -211,15 +215,17 @@ class MainWindow(QMainWindow):
         self.slider = SeekSlider(Qt.Horizontal)
         self.slider.sliderMoved.connect(self.player.setPosition)
         self.time_lbl = T.label("00:00:00.000 | frame 0", "timecode")
-        self.play_btn = T.button("", "play", "play", tooltip="Play / Pause (Space)")
+        self.play_btn = T.button("", "play", "play")
         self.play_btn.clicked.connect(self.toggle_play)
         buttons = [
-            ("5s", "back5", "Back 5 seconds (Shift+Left)", lambda: self.seek_rel(-5000)),
-            ("", "frame_back", "Previous frame (Left)", lambda: self.step(-1)),
+            ("5s", "back5", "Back 5 seconds", lambda: self.seek_rel(-5000)),
+            ("", "frame_back", "Previous frame", lambda: self.step(-1)),
             (None, None, None, None),
-            ("", "frame_fwd", "Next frame (Right)", lambda: self.step(1)),
-            ("5s", "fwd5", "Forward 5 seconds (Shift+Right)", lambda: self.seek_rel(5000)),
+            ("", "frame_fwd", "Next frame", lambda: self.step(1)),
+            ("5s", "fwd5", "Forward 5 seconds", lambda: self.seek_rel(5000)),
         ]
+        tips = {"play": (self.play_btn, "Play / Pause"), "open": (open_btn, "Open a video file"),
+                "shortcuts": (keys_btn, "Keyboard shortcuts")}
         center = QHBoxLayout()
         center.setSpacing(4)
         for text, ic, tip, fn in buttons:
@@ -228,10 +234,12 @@ class MainWindow(QMainWindow):
                 center.addWidget(self.play_btn)
                 center.addSpacing(6)
                 continue
-            b = T.button(text, ic, "icon", tooltip=tip)
+            b = T.button(text, ic, "icon")
             b.clicked.connect(fn)
+            tips[ic] = (b, tip)  # icon names double as shortcut action ids
             center.addWidget(b)
-        self.comment_btn = T.button("Comment", "plus", "primary", tooltip="Pause and comment on this frame")
+        self.comment_btn = T.button("Comment", "plus", "primary")
+        tips["comment"] = (self.comment_btn, "Pause and comment on this frame")
         self.comment_btn.clicked.connect(self.start_comment)
         self.transport = QWidget()
         tg = QGridLayout(self.transport)
@@ -252,6 +260,7 @@ class MainWindow(QMainWindow):
         self.text.setPlaceholderText("What needs to change in this frame? Drag on the video to highlight an area.")
         self.text.setFixedHeight(72)
         self.editor.watch(self.text)
+        self.text.installEventFilter(self)  # Enter saves, Esc cancels, Shift+Enter new line
         row = QHBoxLayout()
         row.setSpacing(6)
         clear = T.button("Clear Highlight", "eraser", "ghost")
@@ -260,6 +269,8 @@ class MainWindow(QMainWindow):
         cancel.clicked.connect(self.end_comment)
         save = T.button("Save Comment", variant="primary")
         save.clicked.connect(self.save_comment)
+        tips.update(clear=(clear, "Remove the highlight box"), cancel=(cancel, "Discard this comment"),
+                    save=(save, "Save this comment"))
         row.addWidget(clear)
         row.addStretch()
         row.addWidget(cancel)
@@ -315,16 +326,18 @@ class MainWindow(QMainWindow):
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(10, 10, 10, 10)
         fl.setSpacing(6)
-        edit_btn = T.button("Edit", "pencil", "ghost", tooltip="Edit selected comment")
+        edit_btn = T.button("Edit", "pencil", "ghost")
         edit_btn.clicked.connect(self.edit_selected)
-        del_btn = T.button("Delete", "trash", "quietDanger", tooltip="Delete selected comment")
+        del_btn = T.button("Delete", "trash", "quietDanger")
         del_btn.clicked.connect(self.delete_selected)
         actions = QHBoxLayout()
         actions.setSpacing(6)
         actions.addWidget(edit_btn, 1)
         actions.addWidget(del_btn, 1)
         fl.addLayout(actions)
-        export_btn = T.button("Export Review", "export", tooltip="Write review.md / review.json and open the folder")
+        export_btn = T.button("Export Review", "export")
+        tips.update(edit=(edit_btn, "Edit selected comment"), delete=(del_btn, "Delete selected comment"),
+                    export=(export_btn, "Write review.md / review.json"))
         export_btn.clicked.connect(self.export)
         fl.addWidget(export_btn)
         sb.addWidget(footer)
@@ -347,9 +360,51 @@ class MainWindow(QMainWindow):
         self.player.mediaStatusChanged.connect(self.on_status)
         self.player.errorOccurred.connect(lambda _e, msg: QMessageBox.warning(self, "Playback error", msg))
 
-        for key, fn in [("Space", self.toggle_play), ("Left", lambda: self.step(-1)), ("Right", lambda: self.step(1)),
-                        ("Shift+Left", lambda: self.seek_rel(-5000)), ("Shift+Right", lambda: self.seek_rel(5000))]:
-            QShortcut(QKeySequence(key), self, lambda fn=fn: None if self.pending else fn())
+        idle = lambda fn: lambda: None if self.pending else fn()  # blocked while writing a comment
+        busy = lambda fn: lambda: fn() if self.pending else None  # only while writing a comment
+        self.action_fns = {
+            "play": idle(self.toggle_play), "frame_back": idle(lambda: self.step(-1)),
+            "frame_fwd": idle(lambda: self.step(1)), "back5": idle(lambda: self.seek_rel(-5000)),
+            "fwd5": idle(lambda: self.seek_rel(5000)), "comment": self.start_comment,
+            "save": busy(self.save_comment), "cancel": busy(self.end_comment),
+            "clear": busy(lambda: self.view.set_norm(None)), "edit": self.edit_selected,
+            "delete": idle(self.delete_selected), "open": idle(self.open_dialog), "export": idle(self.export),
+            "shortcuts": self.open_shortcuts,
+        }
+        self.tips = tips
+        self.shortcuts = {}
+        for a, fn in self.action_fns.items():
+            self.shortcuts[a] = QShortcut(self)
+            self.shortcuts[a].activated.connect(fn)
+        self.apply_shortcuts(S.load())
+
+    # ---------- shortcuts ----------
+    def apply_shortcuts(self, keys):
+        self.keys = keys
+        for a, sc in self.shortcuts.items():
+            sc.setKey(QKeySequence(keys.get(a, "")))
+        for a, (btn, tip) in self.tips.items():
+            k = keys.get(a)
+            btn.setToolTip(f"{tip} ({S.display(k)})" if k else tip)
+
+    def open_shortcuts(self):
+        dlg = S.ShortcutDialog(self.keys, self)
+        if dlg.exec() == QDialog.Accepted:
+            S.save(dlg.keys())
+            self.apply_shortcuts(S.load())
+
+    def eventFilter(self, obj, e):
+        # The comment box swallows Enter itself, so match save/cancel/clear here before it does.
+        if obj is self.text and e.type() == QEvent.KeyPress:
+            seq = S.event_seq(e)
+            if seq == S.NEWLINE:
+                self.text.insertPlainText("\n")
+                return True
+            for a in ("save", "cancel", "clear"):
+                if self.keys.get(a) and seq == QKeySequence(self.keys[a]):
+                    self.action_fns[a]()
+                    return True
+        return super().eventFilter(obj, e)
 
     # ---------- files ----------
     def review_dir(self):

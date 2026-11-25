@@ -8,7 +8,9 @@ reader) can use directly.
 
 - Built-in video browser with pinned folders (right-click a pin to unpin, drag to reorder)
 - Player with play/pause, ±5 s, and single-frame step (Space, Left/Right, Shift+Left/Right)
-- Frame-specific comments with an optional highlight box; edit or delete them from the side panel
+- Frame-specific comments with an optional highlight box; edit or delete them from the side panel.
+  In the comment box, Enter saves, Esc cancels and Shift+Enter adds a new line
+- Keyboard shortcut settings (keyboard button in the header, or Ctrl+,): assign or clear a key for every action
 - Export writes `<video>_review/` next to the video:
   - `review.md` — every comment with timecode, frame number, highlight (px and normalized) and image path
   - `review.json` — the same data, machine-readable
