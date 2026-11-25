@@ -377,6 +377,7 @@ class MainWindow(QMainWindow):
             self.shortcuts[a] = QShortcut(self)
             self.shortcuts[a].activated.connect(fn)
         self.apply_shortcuts(S.load())
+        self.list.setFocus()  # else the first header button starts focused and shows its focus ring
 
     # ---------- shortcuts ----------
     def apply_shortcuts(self, keys):
