@@ -1,0 +1,15 @@
+build/
+dist/
+__pycache__/
+*.pyc
+settings.ini
+*_review/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.wmv
+*.mpg
+*.mpeg
